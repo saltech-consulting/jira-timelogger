@@ -5,6 +5,8 @@ from datetime import datetime
 from jira import JIRA
 from jira.exceptions import JIRAError
 
+import config
+
 class TimeLogger:
     log_entry_format = '{}, {}, {}, {}'
 
@@ -110,6 +112,6 @@ if len(sys.argv) < 2:
     print('Supply the log file path in the first argument')
 else:
     timelog_path = sys.argv[1]
-    time_logger = TimeLogger('http://localhost:8080')
+    time_logger = TimeLogger(config.SERVER)
     time_logger.initalize()
     time_logger.log_from_csv(timelog_path)
