@@ -10,15 +10,15 @@ import config
 class TimeLogger:
     log_entry_format = '{}, {}, {}, {}'
 
-    def __init__(self, server):
-        self._server = server
+    def __init__(self, server_options):
+        self._server_options = server_options
 
     def initalize(self):
         user = input('User: ')
         password = getpass.getpass('Password: ')
 
         self._jira = JIRA(
-            options={'server': self._server},
+            options=self._server_options,
             basic_auth=(user, password))
 
     def log_from_csv(self, path):
@@ -112,6 +112,6 @@ if len(sys.argv) < 2:
     print('Supply the log file path in the first argument')
 else:
     timelog_path = sys.argv[1]
-    time_logger = TimeLogger(config.SERVER)
+    time_logger = TimeLogger(config.SERVER_OPTIONS)
     time_logger.initalize()
     time_logger.log_from_csv(timelog_path)

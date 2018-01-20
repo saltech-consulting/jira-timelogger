@@ -1,1 +1,1 @@
-SERVER = 'http://localhost:8080'
+SERVER_OPTIONS = {'server': 'http://localhost:8080'}
