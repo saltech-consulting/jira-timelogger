@@ -16,6 +16,7 @@ class TimeLogger:
     def initalize(self):
         user = input('User: ')
         password = getpass.getpass('Password: ')
+        print()
 
         self._jira = JIRA(
             options=self._server_options,
