@@ -1,0 +1,2 @@
+class TimeLoggerError(Exception):
+    pass

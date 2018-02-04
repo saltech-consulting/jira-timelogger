@@ -1,118 +1,110 @@
+import logging
 import sys
+import os
+import errno
+import shutil
 import getpass
-import csv
+from glob import glob
 from datetime import datetime
 from jira import JIRA
 from jira.exceptions import JIRAError
 
 import config
+from time_logger import TimeLogger, TimeLoggerError
 
-class TimeLogger:
-    log_entry_format = '{}, {}, {}, {}'
 
-    def __init__(self, server_options):
-        self._server_options = server_options
+def create_dir_if_not_exit(directory):
+    try:
+        logging.debug('Creating directory: {}'.format(directory))
+        os.makedirs(directory)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            logging.error('Unexpected error while creating directory: {}'.format(e))
 
-    def initalize(self):
-        user = input('User: ')
-        password = getpass.getpass('Password: ')
-        print()
+def try_to_move_file(from_path, to_path):
+    try:
+        logging.debug('Moving {} to {}'.format(from_path, to_path))
+        create_dir_if_not_exit(os.path.dirname(to_path))
+        shutil.move(from_path, to_path)
+    except IOError as e:
+        logging.error('IOError while moving file: {}'.format(e))
+    except Exception as e:
+        logging.error('Unexpected error while moving file: {}'.format(e))
 
-        self._jira = JIRA(
-            options=self._server_options,
-            basic_auth=(user, password))
+# Current run directory
+time_suffix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+run_dir_current = os.path.join(config.RUN_DIR, time_suffix)
+run_dir_success = os.path.join(run_dir_current, 'success')
+run_dir_error = os.path.join(run_dir_current, 'error')
+run_dir_log = os.path.join(run_dir_current, 'timelogger.log')
 
-    def log_from_csv(self, path):
-        self._failures = []
+# Create run directory
+os.makedirs(run_dir_current)
 
-        with open(path) as timelog_file:
-            timelog_reader = csv.reader(timelog_file, delimiter=',', quotechar='"')
-            for timelog_row in timelog_reader:
-                issue_key, summary, time, started, user, comment = timelog_row
-                self.log_task(issue_key, summary, time, started, user, comment)
+# Set up logging to file
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename=run_dir_log,
+                    filemode='w')
 
-        print()
-        if self._failures:
-            print('Failures:')
-            for failure in self._failures:
-                print(failure)
-        else:
-            print('Success')
+# Define a Handler which writes INFO messages or higher to the sys.stderr
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+# Set a format which is simpler for console use
+formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+# Tell the handler to use this format
+console.setFormatter(formatter)
+# Add the handler to the root logger
+logging.getLogger('').addHandler(console)
 
-    def log_task(self, issue_key, summary, time, started, user, comment):
-        self._subtask_dictionary = {}
+# Start
+logging.debug('Start')
 
-        self._issue_key = issue_key
-        self._summary = summary
-        self._time = time
-        self._started = datetime.strptime(started, '%Y-%m-%dT%H:%M:%S.000%z')
-        self._user = user
-        self._comment = comment
+# Get user credentials
+user = input('User: ')
+logging.debug('User: {}'.format(user))
+password = getpass.getpass('Password: ')
+print()
 
-        self._try_to_log_task()
+# Create Jira object
+try:
+    jira = JIRA(
+        options=config.SERVER_OPTIONS,
+        basic_auth=(user, password))
+except JIRAError as e:
+    logging.error('JIRAError: {}'.format(e.text))
+    logging.debug('JIRAError: {}'.format(e))
+    sys.exit(1)
 
-    def _try_to_log_task(self):
-        log_entry = self.log_entry_format.format(
-            self._issue_key, self._summary, self._time, self._started, self._comment)
-        print(log_entry, end='', flush=True)
+has_error = False
 
-        try:
-            self._log_task()
-            print(' - OK', flush=True)
-        except JIRAError as e:
-            print(' - Failed', flush=True)
-            self._failures.append('{} - {}'.format(log_entry, e.text))
-        except:
-            print(' - Failed', flush=True)
-            self._failures.append('{} - {}'.format(log_entry, 'Unexpected error'))
+# Create a TimeLogger instance
+time_logger = TimeLogger(jira)
 
-    def _log_task(self):
-        comment = 'Automated worklog loader ({})'.format(self._user)
-        if self._comment:
-            comment += ': {}'.format(self._comment)
+# Read timelog csv files
+timelog_file_glob = os.path.join(config.WORK_DIR, '*.csv')
+timelog_files = glob(timelog_file_glob)
+for timelog_file in timelog_files:
+    try:
+        time_logger.log_from_csv(timelog_file)
+        try_to_move_file(
+            timelog_file,
+            os.path.join(run_dir_success, os.path.basename(timelog_file)))
+    except TimeLoggerError as e:
+        has_error = True
+        try_to_move_file(
+            timelog_file,
+            os.path.join(run_dir_error, os.path.basename(timelog_file)))
+    except Exception as e:
+        has_error = True
+        logging.error('Unexpected error: {}'.format(e))
 
-        if '/' in self._issue_key:
-            issue = self._find_or_create_subtask()
-        else:
-            issue = self._jira.issue(self._issue_key)
+# End
+logging.debug('End')
 
-        self._jira.add_worklog(
-            issue, self._time, started=self._started, comment=comment)
-
-    def _find_or_create_subtask(self):
-        if self._issue_key in self._subtask_dictionary:
-            return self._subtask_dictionary[self._issue_key]
-
-        main_issue_key, sub_issue_id = self._issue_key.split('/')
-        subtasks = self._jira.search_issues('parent=' + main_issue_key)
-        for subtask in subtasks:
-            if subtask.fields.summary.startswith(sub_issue_id):
-                self._subtask_dictionary[self._issue_key] = subtask.key
-                return self._jira.issue(self._subtask_dictionary[self._issue_key])
-
-        return self._create_subtask(main_issue_key, sub_issue_id)
-
-    def _create_subtask(self, main_issue_key, sub_issue_id):
-        main_issue = self._jira.issue(main_issue_key)
-
-        subtask_fields = {
-            'project': { 'key': main_issue.fields.project.key },
-            'summary': sub_issue_id + ': ' + self._summary,
-            'description': 'Automatically created by worklog loader',
-            'issuetype' : { 'name': 'Sub-task' },
-            'parent' : { 'id': main_issue_key }
-        }
-        subtask = self._jira.create_issue(fields=subtask_fields)
-
-        self._subtask_dictionary[self._issue_key] = subtask.key
-        return subtask
-
-###############################################################################
-
-if len(sys.argv) < 2:
-    print('Supply the log file path in the first argument')
+# Set exit status
+if has_error:
+    sys.exit(2)
 else:
-    timelog_path = sys.argv[1]
-    time_logger = TimeLogger(config.SERVER_OPTIONS)
-    time_logger.initalize()
-    time_logger.log_from_csv(timelog_path)
+    sys.exit(0)
