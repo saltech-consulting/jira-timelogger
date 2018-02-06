@@ -100,11 +100,10 @@ for timelog_file in timelog_files:
         has_error = True
         logging.error('Unexpected error: {}'.format(e))
 
-# End
-logging.debug('End')
-
 # Set exit status
 if has_error:
+    logging.error('Finished with errors')
     sys.exit(2)
 else:
+    logging.info('Finished with success')
     sys.exit(0)
