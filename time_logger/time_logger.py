@@ -43,7 +43,7 @@ class TimeLogger:
             self._log_task_from_row(issue_key, summary, time, started, user, comment)
         except ValueError as e:
             self._has_error = True
-            logger.error('Wrong format: {}'.format(e))
+            logging.error('Wrong format: {}'.format(e))
         except Exception as e:
             self._has_error = True
             logging.error('Unexpected error: {}'.format(e))
